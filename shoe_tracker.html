@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Shoe Face Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+    #video { display: none; }
+
+    #loading {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff; font-family: "Courier New", monospace;
+      font-size: 18px; letter-spacing: 4px; text-transform: uppercase;
+      pointer-events: none; z-index: 20;
+    }
+
+    #ui {
+      position: absolute; bottom: 44px; left: 50%;
+      transform: translateX(-50%);
+      text-align: center; color: #fff;
+      font-family: "Courier New", monospace;
+      pointer-events: none; z-index: 10; user-select: none;
+    }
+    #ui .sub   { font-size: 11px; letter-spacing: 4px; opacity: 0.45; margin-bottom: 6px; text-transform: uppercase; }
+    #ui .name  { font-size: 32px; font-weight: bold; letter-spacing: 6px; text-transform: uppercase; }
+    #ui .price { font-size: 14px; letter-spacing: 3px; opacity: 0.55; margin-top: 6px; }
+
+    #buttons {
+      position: absolute; bottom: 44px; right: 56px;
+      display: flex; flex-direction: column; gap: 12px; z-index: 10;
+    }
+    .btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.6);
+      color: #fff; font-family: "Courier New", monospace;
+      font-size: 12px; letter-spacing: 3px; text-transform: uppercase;
+      padding: 11px 26px; cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+    }
+    .btn:hover {
+      background: #fff; color: #000;
+      border-color: #fff; box-shadow: 0 0 18px rgba(255,255,255,0.35);
+    }
+
+    #brand {
+      position: absolute; top: 32px; left: 44px;
+      font-family: "Courier New", monospace;
+      color: rgba(255,255,255,0.35); font-size: 11px;
+      letter-spacing: 5px; text-transform: uppercase;
+      z-index: 10; pointer-events: none;
+    }
+
+    #status-dot {
+      position: absolute; top: 36px; right: 44px;
+      display: flex; align-items: center; gap: 8px;
+      font-family: "Courier New", monospace;
+      font-size: 10px; letter-spacing: 3px;
+      color: rgba(255,255,255,0.35); text-transform: uppercase;
+      z-index: 10; pointer-events: none;
+    }
+    #dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #ff4444; box-shadow: 0 0 6px #ff4444;
+      transition: background 0.4s, box-shadow 0.4s;
+    }
+    #dot.active { background: #44ff88; box-shadow: 0 0 8px #44ff88; }
+  </style>
+</head>
+<body>
+
+  <div id="loading">INITIALIZING...</div>
+  <video id="video" autoplay playsinline></video>
+
+  <div id="brand">Interactive Product</div>
+
+  <div id="status-dot">
+    <div id="dot"></div>
+    <span id="status-text">Connecting</span>
+  </div>
+
+  <div id="ui">
+    <div class="sub">Performance Running</div>
+    <div class="name">Nike ZoomX</div>
+    <div class="price">$220 USD</div>
+  </div>
+
+  <div id="buttons">
+    <button class="btn" onclick="alert('Proceeding to checkout!')">Buy Now</button>
+    <button class="btn" onclick="alert('Added to cart!')">Add to Cart</button>
+    <button class="btn" id="detailsBtn">Show Details</button>
+  </div>
+
+  <div id="details" style="
+    display:none; position:absolute; bottom:200px; right:56px;
+    border:1px solid rgba(255,255,255,0.2);
+    background:rgba(0,0,0,0.85);
+    color:#fff; font-family:'Courier New',monospace;
+    font-size:12px; letter-spacing:2px; line-height:2.2;
+    padding:20px 28px; z-index:10; text-transform:uppercase;">
+    <div style="opacity:0.4;font-size:10px;margin-bottom:8px;letter-spacing:4px">Specifications</div>
+    <div>Weight &nbsp;&nbsp; 195g</div>
+    <div>Drop &nbsp;&nbsp;&nbsp;&nbsp; 8mm</div>
+    <div>Stack &nbsp;&nbsp;&nbsp; 36mm</div>
+    <div>Upper &nbsp;&nbsp;&nbsp; Flyknit</div>
+    <div>Midsole &nbsp; ZoomX Foam</div>
+  </div>
+
+  <script type="importmap">
+    { "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }}
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+    const loadingEl = document.getElementById("loading");
+    const videoEl   = document.getElementById("video");
+    const dot       = document.getElementById("dot");
+    const statusTxt = document.getElementById("status-text");
+
+    // Details toggle
+    document.getElementById("detailsBtn").addEventListener("click", () => {
+      const d = document.getElementById("details");
+      const open = d.style.display === "block";
+      d.style.display = open ? "none" : "block";
+      document.getElementById("detailsBtn").textContent = open ? "Show Details" : "Hide Details";
+    });
+
+    // ── RENDERER ──────────────────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace  = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    // ── SCENE ─────────────────────────────────────────────────────────────
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+
+    const cameraPivot = new THREE.Group();
+    scene.add(cameraPivot);
+    const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 300);
+    camera.position.set(0, 0, 9);
+    cameraPivot.add(camera);
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ── GRID ROOM ─────────────────────────────────────────────────────────
+    function buildGridRoom() {
+      const group = new THREE.Group();
+      const W = 22, H = 13, D = 34, step = 1;
+      const mat = () => new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+
+      function addGrid(cols, rows, cStep, rStep, transform) {
+        const g = new THREE.Group();
+        for (let c = 0; c <= cols; c++) {
+          const x = -cols * cStep / 2 + c * cStep;
+          const geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(x, -rows * rStep / 2, 0),
+            new THREE.Vector3(x,  rows * rStep / 2, 0)
+          ]);
+          g.add(new THREE.Line(geo, mat()));
+        }
+        for (let r = 0; r <= rows; r++) {
+          const y = -rows * rStep / 2 + r * rStep;
+          const geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-cols * cStep / 2, y, 0),
+            new THREE.Vector3( cols * cStep / 2, y, 0)
+          ]);
+          g.add(new THREE.Line(geo, mat()));
+        }
+        transform(g);
+        group.add(g);
+      }
+
+      addGrid(W/step, D/step, step, step, g => { g.rotation.x = -Math.PI/2; g.position.y = -H/2; });
+      addGrid(W/step, D/step, step, step, g => { g.rotation.x =  Math.PI/2; g.position.y =  H/2; });
+      addGrid(W/step, H/step, step, step, g => { g.position.z = -D/2; });
+      addGrid(D/step, H/step, step, step, g => { g.rotation.y =  Math.PI/2; g.position.x = -W/2; });
+      addGrid(D/step, H/step, step, step, g => { g.rotation.y = -Math.PI/2; g.position.x =  W/2; });
+
+      return group;
+    }
+    scene.add(buildGridRoom());
+
+    // ── LIGHTING ──────────────────────────────────────────────────────────
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    keyLight.position.set(4, 8, 6); keyLight.castShadow = true;
+    scene.add(keyLight);
+    const rimLight = new THREE.PointLight(0xaaddff, 1.8, 30);
+    rimLight.position.set(-5, 3, -4); scene.add(rimLight);
+    const fillLight = new THREE.PointLight(0xffffff, 0.8, 20);
+    fillLight.position.set(0, -2, 8); scene.add(fillLight);
+
+    // ── FLOATING 3D LABEL (sprite above shoe) ─────────────────────────────
+    function makeLabel(text, subtext) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640; canvas.height = 160;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, 640, 160);
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.font = "500 26px 'Courier New'";
+      ctx.fillText(subtext.toUpperCase(), 20, 44);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 72px 'Courier New'";
+      ctx.fillText(text.toUpperCase(), 20, 120);
+      const tex = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
+      );
+      sprite.scale.set(6.5, 1.625, 1);
+      sprite.position.set(-0.4, 2.85, 0);
+      return sprite;
+    }
+    scene.add(makeLabel("Nike ZoomX", "Performance Running"));
+
+    // ── GLOW DISC under shoe ───────────────────────────────────────────────
+    const glowMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(1.4, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, side: THREE.DoubleSide })
+    );
+    glowMesh.rotation.x = -Math.PI / 2;
+    glowMesh.position.y = -1.85;
+    scene.add(glowMesh);
+
+    // ── SHOE MODEL ────────────────────────────────────────────────────────
+    let shoeModel = null;
+    new GLTFLoader().load(
+      "shoe.glb",
+      (gltf) => {
+        shoeModel = gltf.scene;
+        const box    = new THREE.Box3().setFromObject(shoeModel);
+        const size   = box.getSize(new THREE.Vector3());
+        const centre = box.getCenter(new THREE.Vector3());
+        const scale  = 3.8 / Math.max(size.x, size.y, size.z);
+        shoeModel.scale.setScalar(scale);
+        shoeModel.position.sub(centre.multiplyScalar(scale));
+        shoeModel.position.y -= 0.3;
+        shoeModel.traverse(c => {
+          if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }
+        });
+        scene.add(shoeModel);
+        loadingEl.style.display = "none";
+      },
+      undefined,
+      () => { loadingEl.textContent = "ERROR: shoe.glb not found!"; }
+    );
+
+    // ── FACE TRACKING ─────────────────────────────────────────────────────
+    let headYaw = 0, headPitch = 0, faceActive = false;
+
+    async function setupFaceTracking() {
+      try {
+        const { FaceLandmarker, FilesetResolver } = await import(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs"
+        );
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+        const fl = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          outputFacialTransformationMatrixes: true,
+          runningMode: "VIDEO", numFaces: 1
+        });
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: "user" }
+        });
+        videoEl.srcObject = stream;
+        await videoEl.play();
+        faceActive = true;
+        dot.classList.add("active");
+        statusTxt.textContent = "";
+
+        let lastTime = -1;
+        function detect() {
+          if (videoEl.currentTime !== lastTime) {
+            lastTime = videoEl.currentTime;
+            try {
+              const r = fl.detectForVideo(videoEl, performance.now());
+              if (r.facialTransformationMatrixes?.length > 0) {
+                const m = r.facialTransformationMatrixes[0].data;
+                headYaw   =  Math.atan2(m[4], m[5]);
+                headPitch = -Math.asin(-m[6]);
+                dot.classList.add("active");
+                statusTxt.textContent = "";
+              } else {
+                dot.classList.remove("active");
+                statusTxt.textContent = "No Face";
+              }
+            } catch(e) {}
+          }
+          requestAnimationFrame(detect);
+        }
+        detect();
+      } catch(e) {
+        console.warn("Mouse fallback:", e);
+        statusTxt.textContent = "Mouse Mode";
+        faceActive = false;
+      }
+    }
+
+    // ── MOUSE FALLBACK ────────────────────────────────────────────────────
+    let mouseX = 0, mouseY = 0;
+    document.addEventListener("mousemove", e => {
+      mouseX = (e.clientX / window.innerWidth  - 0.5) * 2;
+      mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+    });
+
+    // ── SMOOTHED STATE ─────────────────────────────────────────────────────
+    let camX = 0, camY = 0;
+    let shoeRotY = 0, shoeRotX = 0, shoePosY = -0.3;
+
+    // ── ANIMATE ───────────────────────────────────────────────────────────
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const inputX = faceActive ?  headYaw   : mouseX;
+      const inputY = faceActive ? -headPitch : -mouseY;
+
+      // Wall / camera peeping
+      const targetCamX = inputX * 6.0;
+      const targetCamY = inputY * 3.8;
+      camX += (targetCamX - camX) * 0.12;
+      camY += (targetCamY - camY) * 0.12;
+      camera.position.x = camX;
+      camera.position.y = camY;
+      camera.lookAt(0, 0, -5);
+
+      // Shoe rotation
+      shoeRotY += ( inputX * 1.8  - shoeRotY) * 0.12;
+      shoeRotX += (-inputY * 1.1  - shoeRotX) * 0.12;
+      shoePosY += (-0.3 + inputY * 1.8 - shoePosY) * 0.12;
+
+      if (shoeModel) {
+        shoeModel.rotation.y = shoeRotY;
+        shoeModel.rotation.x = shoeRotX;
+        shoeModel.position.y = shoePosY;
+      }
+
+      // Glow pulse
+      glowMesh.material.opacity = 0.05 + 0.04 * Math.sin(Date.now() * 0.002);
+
+      renderer.render(scene, camera);
+    }
+
+    setupFaceTracking();
+    animate();
+  </script>
+</body>
+</html>
