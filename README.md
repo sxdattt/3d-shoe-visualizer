@@ -1,4 +1,5 @@
 3D Shoe Visualizer
+
 An interactive 3D shoe viewer that responds to your head 
 movements. Move your head left or right and the shoe rotates 
 with you (no mouse needed.)
